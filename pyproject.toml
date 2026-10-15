@@ -1,5 +1,5 @@
 [project]
-name = "pumpsync"
+name = "pump-sync"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.scripts]
-pumpsync = "pumpsync:main"
+pump-sync = "pump-sync:main"
 
 [build-system]
 requires = ["uv_build>=0.13.0,<0.14.0"]
