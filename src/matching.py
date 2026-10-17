@@ -1,4 +1,4 @@
-"""Track matching and playlist assembly."""
+"""Track matching and playlist assembly"""
 
 from dataclasses import dataclass
 

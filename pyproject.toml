@@ -3,11 +3,12 @@ name = "pump-sync"
 version = "0.1.0"
 description = "AI workout playlist generator"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "matplotlib>=3.11.2",
     "numpy>=2.5.4",
     "pandas>=3.0.6",
+    "pydantic>=2.14.1",
     "python-dotenv>=1.2.4",
     "scikit-learn>=1.9.1",
     "streamlit>=1.66.0",
