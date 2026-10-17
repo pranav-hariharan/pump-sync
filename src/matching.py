@@ -75,6 +75,7 @@ def top_matches(
     pool_size=60,
     min_popularity=55,
     exclude_genres=GYM_EXCLUDE_GENRES,
+    include_genres=None,
     seed=None,
 ):
     """Return n tracks close to a target feature vector.
@@ -89,6 +90,8 @@ def top_matches(
     mask = lib.df["cluster"].isin(clusters) & (lib.df["popularity"] >= min_popularity)
     if exclude_genres:
         mask &= ~lib.df["track_genre"].isin(exclude_genres)
+    if include_genres:
+        mask &= lib.df["track_genre"].isin(include_genres)
     mask = mask.to_numpy()
 
     out = lib.df[mask].copy()
@@ -108,6 +111,7 @@ def fill_phase(
     max_per_artist=2,
     tolerance_ms=60_000,
     seed=None,
+    include_genres=None,
 ):
     """Select tracks for one phase until its time limit is reached.
 
@@ -116,7 +120,15 @@ def fill_phase(
     used_ids and artist_counts are updated in place so they carry across phases.
     """
     # n equals pool_size so this returns the whole pool of closest matches
-    pool = top_matches(lib, target, clusters, n=60, pool_size=60, seed=seed)
+    pool = top_matches(
+        lib,
+        target,
+        clusters,
+        n=60,
+        pool_size=60,
+        seed=seed,
+        include_genres=include_genres,
+    )
     pool = pool.sample(frac=1, random_state=seed)
 
     chosen, total = [], 0
@@ -138,7 +150,7 @@ def fill_phase(
     return pd.DataFrame(chosen)
 
 
-def build_playlist(lib, plan, duration_min=45, seed=None):
+def build_playlist(lib, plan, duration_min=45, seed=None, include_genres=None):
     """Build a warmup --> peak --> cooldown playlist"""
     total_ms = duration_min * 60_000
     used_ids, artist_counts = set(), {}
@@ -153,6 +165,7 @@ def build_playlist(lib, plan, duration_min=45, seed=None):
             used_ids,
             artist_counts,
             seed=seed,
+            include_genres=include_genres,
         )
 
     # Energy rises through the warmup and dips through the cooldown
