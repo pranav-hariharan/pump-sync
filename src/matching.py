@@ -9,19 +9,7 @@ from sklearn.preprocessing import StandardScaler
 from src.data import FEATURES, PHASE_CLUSTERS
 
 # Genres excluded from matching because they do not suit a workout
-GYM_EXCLUDE_GENRES = [
-    "honky-tonk",
-    "bluegrass",
-    "tango",
-    "country",
-    "folk",
-    "gospel",
-    "jazz",
-    "blues",
-    "rockabilly",
-    "classical",
-    "opera",
-]
+GYM_EXCLUDE_GENRES = ["Country", "Folk", "Jazz", "Blues", "Classical"]
 
 # Portion of the total playlist duration given to each phase
 PHASE_SHARES = {"warmup": 0.2, "peak": 0.6, "cooldown": 0.2}
@@ -87,7 +75,10 @@ def top_matches(
     # The target must be scaled with the same scaler as the tracks
     t = lib.scaler.transform(pd.DataFrame([target])[FEATURES])
 
-    mask = lib.df["cluster"].isin(clusters) & (lib.df["popularity"] >= min_popularity)
+    # clusters=None searches all clusters
+    mask = lib.df["popularity"] >= min_popularity
+    if clusters is not None:
+        mask &= lib.df["cluster"].isin(clusters)
     if exclude_genres:
         mask &= ~lib.df["track_genre"].isin(exclude_genres)
     if include_genres:
@@ -150,7 +141,14 @@ def fill_phase(
     return pd.DataFrame(chosen)
 
 
-def build_playlist(lib, plan, duration_min=45, seed=None, include_genres=None):
+def build_playlist(
+    lib,
+    plan,
+    duration_min=45,
+    seed=None,
+    include_genres=None,
+    restrict_to_phase_clusters=False,
+):
     """Build a warmup --> peak --> cooldown playlist"""
     total_ms = duration_min * 60_000
     used_ids, artist_counts = set(), {}
@@ -160,7 +158,7 @@ def build_playlist(lib, plan, duration_min=45, seed=None, include_genres=None):
         phases[phase] = fill_phase(
             lib,
             plan[phase],
-            PHASE_CLUSTERS[phase],
+            PHASE_CLUSTERS[phase] if restrict_to_phase_clusters else None,
             share * total_ms,
             used_ids,
             artist_counts,

@@ -1,19 +1,34 @@
-"""Data loading, cleaning, scaling and clustering for PumpSync"""
+"""Data loading, cleaning, feature scaling and clustering for PumpSync."""
 
+import json
 from pathlib import Path
 
 import pandas as pd
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 
-DATA_PATH = (
-    Path(__file__).resolve().parent.parent
-    / "data"
-    / "raw"
-    / "spotify-tracks-dataset.csv"
-)
+DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "raw" / "songs.csv"
 
-# Features to use for clustering
+# The lyrics column is skipped: it makes up most of the file size
+USE_COLUMNS = [
+    "id",
+    "name",
+    "artists",
+    "year",
+    "genre",
+    "popularity",
+    "danceability",
+    "energy",
+    "valence",
+    "loudness",
+    "speechiness",
+    "acousticness",
+    "instrumentalness",
+    "tempo",
+    "duration_ms",
+]
+
+# Audio features used for clustering and matching
 FEATURES = [
     "energy",
     "valence",
@@ -24,72 +39,93 @@ FEATURES = [
     "instrumentalness",
 ]
 
-# Genres that do not suit a workout playlist
-EXCLUDE_GENRES = [
-    "comedy",
-    "children",
-    "kids",
-    "disney",
-    "sleep",
-    "study",
-    "opera",
-    "new-age",
-    "show-tunes",
-    "romance",
-    "sad",
-]
+# Oldest release year kept
+MIN_YEAR = 2000
 
-N_CLUSTERS = 5  # Chosen from elbow + silhouette scores
+# Tracks below this popularity are almost always obscure uploads or duplicates
+MIN_POPULARITY = 20
 
-# Manually labeled cluster names, based on the mean feature values of each K-means cluster
+# Number of clusters; re-select with the elbow and silhouette scores after any data change
+N_CLUSTERS = 5
+
 CLUSTER_NAMES = {
-    0: "calm-instrumentals",
-    1: "upbeat",
-    2: "hype-aggressive",
-    3: "chill-laidback",
-    4: "intense",
+    0: "fast-and-heavy",
+    1: "driving-mid-tempo",
+    2: "groovy-danceable",
+    3: "mellow-acoustic",
+    4: "electronic-instrumental",
 }
 
-# Which clusters can fill each workout phase (cluster 0 is excluded since it is not suitable for gym music)
+# Clusters whose profiles describe each phase. These ground the LLM prompt and
+# bound its targets. Track matching can search all clusters (see matching.py).
 PHASE_CLUSTERS = {
-    "warmup": [1],
-    "peak": [2, 4],
+    "warmup": [2],
+    "peak": [0, 1, 4],
     "cooldown": [3],
 }
 
+# Slowed, sped-up, nightcore and live recordings are re-uploads or alternate takes
+VARIANT_PATTERN = (
+    r"slowed|sped up|speed up|nightcore|[-(\[]\s*live\b|\blive (?:at|in|from|on)\b"
+)
+
+# Suffixes that mark the same song re-released (remasters, radio edits, etc.)
+SUFFIX_PATTERN = r"\s*[-(\[]\s*(\d{4}\s+)?(remaster(ed)?|radio edit|mono|stereo)\b.*$"
+
+
+def _parse_artists(value):
+    """The artists column stores a JSON list as text, e.g. '["A", "B"]'."""
+    try:
+        return json.loads(value)
+    except (ValueError, TypeError):
+        return [str(value)]
+
 
 def load_and_clean(path=DATA_PATH):
-    """Load the CSV and clean the data."""
-    df = pd.read_csv(path)
+    """Load the tracks CSV and return a cleaned DataFrame."""
+    df = pd.read_csv(path, usecols=USE_COLUMNS)
 
-    # Drop leftover index columns from the CSV export
-    df = df.loc[:, ~df.columns.str.startswith("Unnamed")]
+    # Rename to the column names the rest of the code uses
+    df = df.rename(
+        columns={"id": "track_id", "name": "track_name", "genre": "track_genre"}
+    )
 
     df = df.dropna()
-    df = df[~df["track_genre"].isin(EXCLUDE_GENRES)]
+    df = df[(df["year"] >= MIN_YEAR) & (df["popularity"] >= MIN_POPULARITY)]
+    df = df[~df["track_name"].str.contains(VARIANT_PATTERN, case=False, regex=True)]
 
-    # Same song appears once per genre tag, so keep one row per track_id
-    df = df.drop_duplicates(subset="track_id")
+    artist_lists = df["artists"].map(_parse_artists)
+    df["main_artist"] = artist_lists.str[0]
+    df["artists"] = artist_lists.map(", ".join)
 
-    # Same song also appears under different track_ids (remixes).
-    # Keep the most popular version of each title + main artist.
-    df["main_artist"] = df["artists"].str.split(";").str[0]
+    # The same song appears under several IDs (remasters, re-releases) with
+    # unreliable popularity. Keep the most popular version of each title + main artist.
+    df["title_key"] = (
+        df["track_name"]
+        .str.replace(SUFFIX_PATTERN, "", regex=True, case=False)
+        .str.lower()
+        .str.strip()
+    )
     df = df.sort_values("popularity", ascending=False)
-    df = df.drop_duplicates(subset=["track_name", "main_artist"])
+    df = df.drop_duplicates(subset=["title_key", "main_artist"])
 
     df = df[
-        (df["tempo"] > 0)  # 0 BPM = junk data
-        & (
-            df["duration_ms"].between(120_000, 420_000)
-        )  # 2-7 mins keeps length appropriate for workout
-        & (df["speechiness"] < 0.66)
-    ]  # Doesn't suit a workout
+        (df["tempo"] > 0)  # tempo of 0 is invalid data
+        & (df["duration_ms"].between(120_000, 420_000))  # 2-7 minutes
+        & (df["speechiness"] < 0.66)  # exclude spoken-word tracks
+    ]
 
-    return df.reset_index(drop=True)
+    return df.drop(columns="title_key").reset_index(drop=True)
 
 
 def build_model(df):
-    """Scale the features and cluster the songs through K-means."""
+    """Standardize the features and cluster the tracks with K-Means.
+
+    Returns the DataFrame with `cluster` and `cluster_name` columns, the
+    scaled feature matrix X, the fitted scaler and the fitted KMeans model.
+    The scaler is returned so that target vectors can later be transformed
+    into the same feature space as the tracks.
+    """
     scaler = StandardScaler()
     X = scaler.fit_transform(df[FEATURES])
 
@@ -101,18 +137,23 @@ def build_model(df):
 
 
 def check_clusters(df):
-    """Raise AssertionError if the cluster numbering no longer matches CLUSTER_NAMES."""
-    p = df.groupby("cluster")[FEATURES].mean()
-    assert p.loc[0, "energy"] < 0.3, "cluster 0 should be quiet"
-    assert p.loc[2, "tempo"] > p.loc[3, "tempo"] and p.loc[2, "energy"] > 0.75, (
-        "cluster 2 should be hype-aggressive"
+    """Raise an AssertionError if the phase-to-cluster mapping is out of order.
+
+    Cluster numbers are arbitrary, so this checks the property that matters:
+    average energy must rise from cooldown to warmup to peak.
+    """
+    energy = {
+        p: df[df["cluster"].isin(c)]["energy"].mean() for p, c in PHASE_CLUSTERS.items()
+    }
+    assert energy["peak"] > energy["warmup"] > energy["cooldown"], (
+        f"phase clusters are not ordered by energy: {energy}"
     )
-    assert p.loc[3, "energy"] < 0.5, "cluster 3 should be chill"
 
 
-def load_all():
-    """Load, clean, scale and cluster the data."""
+def load_all(check=True):
+    """Load, clean, scale and cluster the data. Returns (df, X, scaler, km)."""
     df = load_and_clean()
     df, X, scaler, km = build_model(df)
-    check_clusters(df)
+    if check:
+        check_clusters(df)
     return df, X, scaler, km
