@@ -40,7 +40,7 @@ FEATURES = [
 ]
 
 # Oldest release year kept
-MIN_YEAR = 2000
+MIN_YEAR = 1990
 
 # Tracks below this popularity are almost always obscure uploads or duplicates
 MIN_POPULARITY = 20
@@ -49,9 +49,9 @@ MIN_POPULARITY = 20
 N_CLUSTERS = 5
 
 CLUSTER_NAMES = {
-    0: "fast-and-heavy",
+    0: "groovy-danceable",
     1: "driving-mid-tempo",
-    2: "groovy-danceable",
+    2: "fast-and-heavy",
     3: "mellow-acoustic",
     4: "electronic-instrumental",
 }
@@ -59,8 +59,8 @@ CLUSTER_NAMES = {
 # Clusters whose profiles describe each phase. These ground the LLM prompt and
 # bound its targets. Track matching can search all clusters (see matching.py).
 PHASE_CLUSTERS = {
-    "warmup": [2],
-    "peak": [0, 1, 4],
+    "warmup": [0],
+    "peak": [1, 2, 4],
     "cooldown": [3],
 }
 

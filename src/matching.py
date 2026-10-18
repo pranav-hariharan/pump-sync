@@ -61,7 +61,7 @@ def top_matches(
     clusters,
     n=20,
     pool_size=60,
-    min_popularity=55,
+    min_popularity=40,
     exclude_genres=GYM_EXCLUDE_GENRES,
     include_genres=None,
     seed=None,
