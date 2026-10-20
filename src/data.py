@@ -157,3 +157,38 @@ def load_all(check=True):
     if check:
         check_clusters(df)
     return df, X, scaler, km
+
+
+PREPARED_PATH = (
+    Path(__file__).resolve().parent.parent
+    / "data"
+    / "processed"
+    / "tracks_prepared.csv.gz"
+)
+
+KEEP_COLS = [
+    "track_id",
+    "track_name",
+    "artists",
+    "main_artist",
+    "track_genre",
+    "year",
+    "popularity",
+    "duration_ms",
+    "cluster",
+] + FEATURES
+
+
+def save_prepared(df):
+    """Save the cleaned data with cluster labels, only the columns the app needs."""
+    PREPARED_PATH.parent.mkdir(parents=True, exist_ok=True)
+    df[KEEP_COLS].to_csv(PREPARED_PATH, index=False, compression="gzip")
+
+
+def load_prepared():
+    """Load the prepared file and rebuild X and the scaler. No raw CSV, no K-Means refit."""
+    df = pd.read_csv(PREPARED_PATH)
+    scaler = StandardScaler().fit(df[FEATURES])
+    X = scaler.transform(df[FEATURES])
+    df["cluster_name"] = df["cluster"].map(CLUSTER_NAMES)
+    return df, X, scaler
