@@ -1,20 +1,18 @@
-"""PumpSync: describe a workout and get a warmup -> peak -> cooldown playlist."""
-
 import random
 
 import streamlit as st
 
-from src.data import load_all
+from src.data import load_prepared
 from src.matching import Library, build_playlist
 from src.mood import MoodParser
 
-st.set_page_config(page_title="PumpSync", page_icon="🎧", layout="centered")
+st.set_page_config(page_title="PumpSync")
 
 
-@st.cache_resource(show_spinner="Loading the track library...")
+@st.cache_resource
 def get_resources():
-    """Load and cluster the data once per server process."""
-    df, X, scaler, _ = load_all()
+    # cached so the data loads once per server process, not on every click
+    df, X, scaler = load_prepared()
     lib = Library(df, X, scaler)
     return lib, MoodParser(lib)
 
@@ -22,33 +20,33 @@ def get_resources():
 lib, parser = get_resources()
 
 st.title("PumpSync")
-st.caption("Describe your session and get a playlist shaped to it.")
+st.write("Describe your workout and get a warmup, peak and cooldown playlist.")
 
 text = st.text_area(
-    "What kind of session is it?",
-    placeholder="e.g. feeling sluggish but need to hit a heavy leg day",
+    "Session description",
+    placeholder="e.g. heavy leg day, feeling tired",
     max_chars=300,
 )
-duration = st.slider("Playlist length (minutes)", 30, 60, 45, step=5)
+duration = st.slider("Length (minutes)", 30, 60, 45, step=5)
 genres = st.multiselect(
-    "Genres (optional)",
+    "Genres (leave empty for all)",
     sorted(lib.df["track_genre"].unique()),
-    help="Leave empty to allow all genres",
 )
+
 if st.button("Generate playlist", type="primary", disabled=not text.strip()):
-    with st.spinner("Reading your session and picking tracks..."):
-        plan, used_fallback = parser.parse(text)
-        playlist = build_playlist(
-            lib,
-            plan,
-            duration,
-            seed=random.randrange(10**6),
-            include_genres=genres or None,
-        )
+    plan, used_fallback = parser.parse(text)
+    # new random seed each click, so clicking again gives a different playlist
+    playlist = build_playlist(
+        lib,
+        plan,
+        duration,
+        seed=random.randrange(10**6),
+        include_genres=genres or None,
+    )
+
     if used_fallback:
         st.warning(
-            "Couldn't interpret your description, so a default workout "
-            "plan was used instead."
+            "Gemini failed, so a default plan was used instead of your description."
         )
 
     total_min = playlist["duration_ms"].sum() / 60_000
@@ -69,5 +67,5 @@ if st.button("Generate playlist", type="primary", disabled=not text.strip()):
         },
     )
 
-    st.markdown("**Energy across the playlist**")
+    st.write("Energy across the playlist")
     st.line_chart(playlist["energy"].reset_index(drop=True))
